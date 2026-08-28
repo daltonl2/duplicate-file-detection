@@ -27,8 +27,8 @@ echo "Indexing files... (this may take a while on network drives)"
 find "$directory" -type f -not -path '*/.git/*' -print0 |
 while IFS= read -r -d $'\0' file; do
 
-    # Generate MD5 hash for the file
-    hash=$(md5sum "$file" | awk '{print $1}')
+    # Generate SHA-256 hash for the file
+    hash=$(sha256sum "$file" | awk '{print $1}')
 
     # Append in index file: "hash filepath"
     printf "%s\t%s\n" "$hash" "$file" >> "$hash_index"
