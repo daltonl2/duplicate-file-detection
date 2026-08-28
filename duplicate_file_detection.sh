@@ -23,6 +23,10 @@ hash_index="index.txt"
 
 echo "Indexing files... (this may take a while on network drives)"
 
+# Count files first so the terminal can show indexing progress.
+file_count=$(find "$directory" -type f -not -path '*/.git/*' -print0 | tr -cd '\0' | wc -c)
+processed_files=0
+
 # Process each file in the directory
 find "$directory" -type f -not -path '*/.git/*' -print0 |
 while IFS= read -r -d $'\0' file; do
@@ -32,7 +36,18 @@ while IFS= read -r -d $'\0' file; do
 
     # Append in index file: "hash filepath"
     printf "%s\t%s\n" "$hash" "$file" >> "$hash_index"
+
+    processed_files=$((processed_files + 1))
+    if [[ "$file_count" -gt 0 ]]; then
+        progress_percent=$((processed_files * 100 / file_count))
+        printf '\rIndexing: %d/%d files (%d%%)' "$processed_files" "$file_count" "$progress_percent"
+    fi
 done
+
+if [[ "$file_count" -eq 0 ]]; then
+    printf '\rIndexing: 0/0 files (0%%)'
+fi
+printf '\n'
 
 echo "Scanning for Duplicates..."
 
