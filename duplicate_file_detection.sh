@@ -2,7 +2,6 @@
 
 # Ask for the directory path
 echo "Enter the directory path:"
-
 read directory
 
 # Check if the directory exists
@@ -11,71 +10,80 @@ if [[ ! -d "$directory" ]]; then
     exit 1
 fi
 
-# Create or clear the log file
+# Create or clear log files
 log_file="duplicate_files.txt"
-
 > "$log_file"
 
-# Temporary file to store hashes and filenames
 hash_index="index.txt"
-
 > "$hash_index"
 
 echo "Indexing files... (this may take a while on network drives)"
 
-# Process each file in the directory
+# Recursively index each file for hash, size, and path and place in index file
 find "$directory" -type f -not -path '*/.git/*' -print0 |
 while IFS= read -r -d $'\0' file; do
-
-    # Generate MD5 hash for the file
+    size=$(stat -c%s "$file")
     hash=$(md5sum "$file" | awk '{print $1}')
-
-    # Append in index file: "hash filepath"
-    printf "%s\t%s\n" "$hash" "$file" >> "$hash_index"
+    printf "%s\t%s\t%s\n" "$hash" "$size" "$file" >> "$hash_index"
 done
 
-echo "Scanning for Duplicates..."
+echo "Grouping and sorting duplicates..."
 
-# create copy of sorted index
-sort "$hash_index" > index_sorted.txt
-
-# Sort and group by hash; find duplicates
-echo "Sorting Index ..."
-
-sort "$hash_index" | awk -F '\t' '
+# Process index into groups and store file lists in tab-separated fields
+awk -F'\t' '
 {
-    hash = $1
-    file = $2
-    if (hash == last_hash) {
-        count++
-        files[count] = file
-    } else {
-        if (count > 1) {
-            print "Duplicate group for hash " last_hash ":"
-            for (i = 1; i <= count; i++) {
-                print "  " files[i]
-            }
-            print ""
-        }
-        # reset group
-        delete files
-        count = 1
-        files[count] = file
-    }
-    last_hash = hash
+    hash=$1
+    size=$2
+    file=$3
+
+    # Unique key grouped by hash + size
+    key = hash FS size
+
+    # Track count
+    count[key]++
+
+    # Store files as tab-separated fields
+    if (files[key] == "")
+        files[key] = file
+    else
+        files[key] = files[key] FS file
 }
 
 END {
-    # process the final group
-
-    if (count > 1) {
-        print "Duplicate group for hash " last_hash ":"
-        for (i = 1; i <= count; i++) {
-            print "  " files[i]
+    # Output format: size TAB count TAB hash TAB file1 TAB file2 TAB ...
+    for (k in count) {
+        if (count[k] > 1) {
+            split(k, parts, FS)
+            hash=parts[1]
+            size=parts[2]
+            printf "%s\t%d\t%s\t%s\n", size, count[k], hash, files[k]
         }
     }
 }
+' "$hash_index" |
 
-' | tee -a "$log_file"
+# Sort groups by size desc, then count desc
+sort -t $'\t' -k1,1nr -k2,2nr |
 
-echo "Duplicate file names have been logged to $log_file"
+# Pretty-print groups
+awk -F'\t' '
+{
+    size=$1
+    count=$2
+    hash=$3
+
+    print "Duplicate group:"
+    print "  Hash: " hash
+    print "  Size: " size " bytes"
+    print "  Count: " count
+    print "  Files:"
+
+    # Print all files (fields 4..NF)
+    for (i=4; i<=NF; i++) {
+        print "    " $i
+    }
+    print ""
+}
+' >> "$log_file"
+
+echo "Duplicate groups logged to $log_file"
